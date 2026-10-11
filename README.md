@@ -1,2 +1,2 @@
 # Angels
-@ discord.gg/sEHJX84xBb
+@ https://discord.gg/sEHJX84xBb
