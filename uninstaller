@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then BOLD=$'\033[97m'; DIM=$'\033[90m'; GREEN=$'\033[92m'; RESET=$'\033[0m'; else BOLD=''; DIM=''; GREEN=''; RESET=''; fi
+printf '\n%s   A N G E L S   ·   U N I N S T A L L%s\n\n' "$BOLD" "$RESET"
+if [[ "$(uname -s)" != "Darwin" ]]; then echo 'This uninstaller is for macOS only.' >&2; exit 1; fi
+found=()
+for candidate in "/Applications/Angels.app" "$HOME/Applications/Angels.app"; do
+  if [[ -d "$candidate" && ! -L "$candidate" ]]; then found+=("$candidate"); fi
+done
+if (( ${#found[@]} == 0 )); then
+  echo 'Angels.app was not found in the Applications folders. Nothing to uninstall.'
+  exit 0
+fi
+printf 'The following Angels app bundle(s) will be removed:\n'
+for candidate in "${found[@]}"; do printf '  • %s\n' "$candidate"; done
+printf '\n%sRoblox, its settings, and your personal files will not be touched.%s\n' "$DIM" "$RESET"
+if [[ ! -t 0 ]]; then echo 'Interactive confirmation required; nothing removed.' >&2; exit 1; fi
+read -r -p "Type UNINSTALL to confirm: " answer
+if [[ "$answer" != 'UNINSTALL' ]]; then echo 'Cancelled. No changes made.'; exit 0; fi
+for candidate in "${found[@]}"; do
+  # Recheck the exact target immediately before removing it.
+  [[ "$candidate" == '/Applications/Angels.app' || "$candidate" == "$HOME/Applications/Angels.app" ]] || exit 1
+  [[ -d "$candidate" && ! -L "$candidate" ]] || { echo "Skipping changed path: $candidate"; continue; }
+  if [[ -w "$(dirname "$candidate")" ]]; then
+    /bin/rm -rf -- "$candidate"
+  else
+    sudo /bin/rm -rf -- "$candidate"
+  fi
+  echo "Removed $candidate"
+done
+printf '\n%s✓ Angels uninstalled.%s\n' "$GREEN" "$RESET"
+echo 'App preferences and cache were deliberately left in place.'
