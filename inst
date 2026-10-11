@@ -128,6 +128,7 @@ if [[ -d /Applications/Angels.app || -d "$HOME/Applications/Angels.app" ]]; then
  read -r -p 'Reinstall Angels? [y/N]: ' answer
  case "$answer" in y|Y|yes|YES) ;; *) echo 'Reinstall cancelled.'; exit 0;; esac
 fi
+printf '\nNote: macOS may ask for your administrator password to install Angels.\n'
 printf '\n› Downloading Angels\n'
 progress_start
 if ! curl -fsSL --retry 2 -H 'Cache-Control: no-cache' "https://api.github.com/repos/$repo/releases?per_page=100&cache=$(date +%s)" -o "$tmp/latest.json" 2>"$tmp/error.log"; then
