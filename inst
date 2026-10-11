@@ -101,23 +101,32 @@ if [[ -d /Applications/Angels.app || -d "$HOME/Applications/Angels.app" ]]; then
  case "$answer" in y|Y|yes|YES) ;; *) echo 'Reinstall cancelled.'; exit 0;; esac
 fi
 step "Checking for the latest release"
-animated 'Fetching release information' curl -fsSL --retry 2 "https://api.github.com/repos/$repo/releases?per_page=30" -o "$tmp/latest.json"
+animated 'Fetching release information' curl -fsSL --retry 2 -H 'Cache-Control: no-cache' "https://api.github.com/repos/$repo/releases?per_page=100&cache=$(date +%s)" -o "$tmp/latest.json"
 python3 - "$tmp/latest.json" "$tmp/links" <<'PY'
 import json, sys
 from urllib.parse import urlparse
 releases = json.load(open(sys.argv[1]))
 if not isinstance(releases, list):
     raise SystemExit('Unexpected GitHub release response.')
-r = next((release for release in releases if not release.get('draft') and not release.get('prerelease') and any(a.get('name', '').startswith('Angels-arm64-') and a.get('name', '').endswith('.pkg') for a in release.get('assets', []))), None)
-if r is None:
-    raise SystemExit('No published Angels macOS package found among the recent releases.')
-assets = r.get('assets', [])
-pkg = next((a for a in assets if a['name'].startswith('Angels-arm64-') and a['name'].endswith('.pkg')), None)
-if not pkg:
-    raise SystemExit('No published Angels Apple Silicon installer is available yet.')
-checksum = next((a for a in assets if a['name'] == pkg['name'] + '.sha256'), None)
-if not checksum:
-    raise SystemExit('The release has no matching checksum; installation cancelled.')
+# Pick the highest numbered published release with matching checksum.
+import re
+candidates = []
+for release in releases:
+    if release.get('draft') or release.get('prerelease'):
+        continue
+    assets = release.get('assets', [])
+    for asset in assets:
+        match = re.fullmatch(r'Angels-arm64-(\d+\.\d+\.\d+)\.pkg', asset.get('name', ''))
+        if not match:
+            continue
+        sha = next((entry for entry in assets if entry.get('name') == asset['name'] + '.sha256'), None)
+        if sha:
+            candidates.append((tuple(int(x) for x in match.group(1).split('.')), asset, sha, release))
+if not candidates:
+    raise SystemExit('No published Angels macOS release includes both a .pkg and checksum.')
+version, pkg, checksum, release = max(candidates, key=lambda entry: entry[0])
+print('Latest published Angels macOS: ' + '.'.join(str(x) for x in version))
+print('Release: ' + release.get('html_url', 'unknown'))
 for asset in (pkg, checksum):
     url = urlparse(asset['browser_download_url'])
     if url.scheme != 'https' or url.hostname != 'github.com' or not url.path.startswith('/jaxonsfx-web/angelsinstaller/releases/download/'):
@@ -128,6 +137,10 @@ PY
 pkg_url="$(sed -n '1p' "$tmp/links")"
 checksum_url="$(sed -n '2p' "$tmp/links")"
 pkg_name="$(sed -n '3p' "$tmp/links")"
+printf '\nSelected package: %s\n' "$pkg_name"
+if [[ "$pkg_name" == "Angels-arm64-0.9.0.pkg" ]]; then
+  echo 'Only Angels 0.9.0 is published. Newer Actions builds require publication as a release.'
+fi
 step "Downloading Angels"
 animated 'Downloading application package' curl -fSL --retry 2 "$pkg_url" -o "$tmp/$pkg_name"
 animated 'Downloading verification checksum' curl -fSL --retry 2 "$checksum_url" -o "$tmp/$pkg_name.sha256"
