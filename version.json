@@ -1,0 +1,9 @@
+{
+  "name": "Angels",
+  "platform": "macos",
+  "architecture": "arm64",
+  "distribution": "github-releases",
+  "repository": "jaxonsfx-web/angelsinstaller",
+  "latestRelease": "https://api.github.com/repos/jaxonsfx-web/angelsinstaller/releases/latest",
+  "status": "awaiting-first-release"
+}
