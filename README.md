@@ -1,19 +1,31 @@
 # Angels Installer
-Public installer for **Angels**, the macOS Roblox launcher.
 
-This repository contains **installation scripts and release metadata only**, not the application source tree. Compiled installers must be published as GitHub Release assets to become downloadable.
+Public macOS install and uninstall scripts for **Angels**. This repository contains no application source files.
 
-## Install (Apple Silicon)
-Review [inst](inst) before running:
+## Install Angels
+Review [inst](inst) first, then run:
+
 ```bash
 bash <(curl -fsSL "https://raw.githubusercontent.com/jaxonsfx-web/angelsinstaller/main/inst")
 ```
 
-The script downloads the latest published `Angels-arm64-<version>.pkg` and matching `.sha256` asset, checks the checksum, and invokes the macOS installer. **Until a release exists, the install command will report that no package is available.**
+The installer shows an Angels banner and animated progress while it checks for the latest release, downloads the package, verifies the published SHA-256 checksum, and launches the standard macOS package installer targeting `/Applications`.
 
-## Releases and updates
-Upload a built Angels package and a matching checksum file to a GitHub Release in this repository. The application can check `https://api.github.com/repos/jaxonsfx-web/angelsinstaller/releases/latest` for the current release.
+**Requires:** macOS on Apple Silicon (arm64), a published GitHub Release containing `Angels-arm64-<version>.pkg` and matching `.pkg.sha256`. **No installer is downloadable until that release exists.** The script may prompt for your administrator password.
 
-**License notice:** Publishing an installer without source files does not eliminate source-availability obligations for software incorporating GPL-licensed code. Ensure recipients can access the corresponding source code in accordance with the upstream licenses.
+## Uninstall Angels
+Review [uninstaller](uninstaller) first, then run:
 
-This installer does not request GitHub credentials or download private repository contents.
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/jaxonsfx-web/angelsinstaller/main/uninstaller")
+```
+
+The uninstaller finds only `/Applications/Angels.app` and `~/Applications/Angels.app`, lists the bundles it will remove, and requires the exact confirmation `UNINSTALL`. It does **not** remove Roblox, other applications, caches, or user settings.
+
+## Publishing releases
+Publish compiled packages as GitHub Release assets with corresponding SHA-256 checksums; the installer will never need source repository credentials. Do not add application source files, development archives, or debugging artifacts to this public repository.
+
+**Licensing:** An installer-only repository does not remove source-availability obligations for any application derived from GPL-3.0-covered code. Provide corresponding application source to binary recipients as required.
+
+## Limitations
+The installer and uninstaller are shell scripts and have not yet been end-to-end tested on a released Angels build. Ensure macOS code signing/notarization is addressed before public distribution. A checksum alongside a release verifies download integrity but is not a substitute for a trusted signing identity.
