@@ -55,6 +55,38 @@ animated() {
   complete "$label"
 }
 
+BACKUP_ROOT="$HOME/Documents/Angels Settings Backup"
+DATA_DIR="$HOME/Library/Application Support/Angels"
+PREF_FILE="$HOME/Library/Preferences/com.angels.launcher.plist"
+restore_settings() {
+  [[ -d "$BACKUP_ROOT" ]] || return 0
+  local folder latest="" ans
+  for folder in "$BACKUP_ROOT"/20*; do
+    [[ -d "$folder" && ! -L "$folder" ]] && latest="$folder"
+  done
+  [[ -n "$latest" ]] || return 0
+  printf '\nPrevious Angels settings backup found in Documents.\n%s\n' "$latest"
+  [[ -t 0 ]] || { echo "Restore skipped (requires interactive confirmation)."; return 0; }
+  read -r -p 'Use these previous settings? [y/N]: ' ans
+  case "$ans" in y|Y|yes|YES) ;;
+    *) echo "Keeping backup for later."; return 0 ;;
+  esac
+  if [[ -d "$latest/data/Angels" && ! -L "$latest/data/Angels" ]]; then
+    if [[ -e "$DATA_DIR" ]]; then echo "Existing Angels data found; not overwriting."; else
+      mkdir -p "$(dirname "$DATA_DIR")"
+      ditto "$latest/data/Angels" "$DATA_DIR"
+      echo "Restored Angels data."
+    fi
+  fi
+  if [[ -f "$latest/prefs/com.angels.launcher.plist" && ! -L "$latest/prefs/com.angels.launcher.plist" ]]; then
+    if [[ -e "$PREF_FILE" ]]; then echo "Existing Angels preferences found; not overwriting."; else
+      mkdir -p "$(dirname "$PREF_FILE")"
+      cp -p "$latest/prefs/com.angels.launcher.plist" "$PREF_FILE"
+      echo "Restored Angels preferences."
+    fi
+  fi
+}
+
 banner
 [[ "$(uname -s)" == "Darwin" ]] || { fail "Angels requires macOS."; exit 1; }
 [[ "$(uname -m)" == "arm64" ]] || { fail "This release supports Apple Silicon Macs only."; exit 1; }
@@ -62,6 +94,12 @@ for cmd in curl shasum python3 sed; do command -v "$cmd" >/dev/null || { fail "M
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 repo='jaxonsfx-web/angelsinstaller'
+if [[ -d /Applications/Angels.app || -d "$HOME/Applications/Angels.app" ]]; then
+ echo 'Angels is already installed. Reinstall the latest released version?'
+ [[ -t 0 ]] || { echo 'Confirmation required to reinstall.'; exit 1; }
+ read -r -p 'Reinstall Angels? [y/N]: ' answer
+ case "$answer" in y|Y|yes|YES) ;; *) echo 'Reinstall cancelled.'; exit 0;; esac
+fi
 step "Checking for the latest release"
 animated 'Fetching release information' curl -fsSL --retry 2 "https://api.github.com/repos/$repo/releases/latest" -o "$tmp/latest.json"
 python3 - "$tmp/latest.json" "$tmp/links" <<'PY'
@@ -94,4 +132,5 @@ step 'Installing to /Applications'
 printf '%s\n' "${GREY}macOS may request your administrator password.${RESET}"
 animated 'Installing Angels.app' sudo /usr/sbin/installer -pkg "$tmp/$pkg_name" -target /
 printf '\n%s✓ Angels installation complete.%s\n' "$GREEN" "$RESET"
+restore_settings
 printf 'Open Angels from the Applications folder.\n\n'
