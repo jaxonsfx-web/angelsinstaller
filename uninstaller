@@ -29,6 +29,24 @@ ART
   printf '%s\n' "${GREY}                A N G E L S${RESET}"
   printf '%s\n\n' "${GREY}        macOS uninstaller · Apple Silicon${RESET}"
 }
+BACKUP_ROOT="$HOME/Documents/Angels Settings Backup"
+DATA_DIR="$HOME/Library/Application Support/Angels"
+PREF_FILE="$HOME/Library/Preferences/com.angels.launcher.plist"
+backup_settings() {
+  mkdir -p "$BACKUP_ROOT"
+  local stage dest
+  stage="$(mktemp -d "$BACKUP_ROOT/.pending.XXXXXX")"
+  if [[ -d "$DATA_DIR" && ! -L "$DATA_DIR" ]]; then mkdir -p "$stage/data"; ditto "$DATA_DIR" "$stage/data/Angels"; fi
+  if [[ -f "$PREF_FILE" && ! -L "$PREF_FILE" ]]; then mkdir -p "$stage/prefs"; cp -p "$PREF_FILE" "$stage/prefs/"; fi
+  if [[ ! -e "$stage/data/Angels" && ! -f "$stage/prefs/com.angels.launcher.plist" ]]; then
+    rmdir "$stage/data" "$stage/prefs" "$stage" 2>/dev/null || true
+    echo "No supported Angels settings found; nothing was saved."
+    return 0
+  fi
+  dest="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)-$"
+  mv "$stage" "$dest"
+  printf 'Settings saved: %s\n' "$dest"
+}
 banner()
 if [[ "$(uname -s)" != "Darwin" ]]; then echo 'This uninstaller is for macOS only.' >&2; exit 1; fi
 found=()
@@ -43,6 +61,9 @@ printf 'The following Angels app bundle(s) will be removed:\n'
 for candidate in "${found[@]}"; do printf '  • %s\n' "$candidate"; done
 printf '\n%sRoblox, its settings, and your personal files will not be touched.%s\n' "$DIM" "$RESET"
 if [[ ! -t 0 ]]; then echo 'Interactive confirmation required; nothing removed.' >&2; exit 1; fi
+printf '\nYou may have Angels preferences you want to keep. Save a backup to Documents before uninstalling?\n'
+read -r -p 'Save settings? [Y/n]: ' save_answer
+case "$save_answer" in n|N|no|NO) echo 'Skipping backup.';; *) backup_settings || { echo 'Backup failed; uninstall cancelled.' >&2; exit 1; };; esac
 read -r -p "Type UNINSTALL to confirm: " answer
 if [[ "$answer" != 'UNINSTALL' ]]; then echo 'Cancelled. No changes made.'; exit 0; fi
 for candidate in "${found[@]}"; do
@@ -57,4 +78,4 @@ for candidate in "${found[@]}"; do
   echo "Removed $candidate"
 done
 printf '\n%s✓ Angels uninstalled.%s\n' "$GREEN" "$RESET"
-echo 'App preferences and cache were deliberately left in place.'
+echo 'Original preferences and cache remain untouched. Backups are stored in Documents.'
