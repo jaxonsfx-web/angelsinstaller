@@ -66,16 +66,41 @@ read -r -p 'Save settings? [Y/n]: ' save_answer
 case "$save_answer" in n|N|no|NO) echo 'Skipping backup.';; *) backup_settings || { echo 'Backup failed; uninstall cancelled.' >&2; exit 1; };; esac
 read -r -p "Type UNINSTALL to confirm: " answer
 if [[ "$answer" != 'UNINSTALL' ]]; then echo 'Cancelled. No changes made.'; exit 0; fi
+# A PKG installed with sudo can own files even when /Applications itself is writable.
+# Always use administrator privileges for the system Applications folder.
+removed=0
+failed=0
 for candidate in "${found[@]}"; do
-  # Recheck the exact target immediately before removing it.
   [[ "$candidate" == '/Applications/Angels.app' || "$candidate" == "$HOME/Applications/Angels.app" ]] || exit 1
-  [[ -d "$candidate" && ! -L "$candidate" ]] || { echo "Skipping changed path: $candidate"; continue; }
-  if [[ -w "$(dirname "$candidate")" ]]; then
-    /bin/rm -rf -- "$candidate"
+  [[ -d "$candidate" && ! -L "$candidate" ]] || { echo "Skipping changed path: $candidate" >&2; failed=1; continue; }
+  if [[ "$candidate" == '/Applications/Angels.app' ]]; then
+    echo 'Administrator permission is required to remove the system-installed Angels app.'
+    if ! sudo /bin/rm -rf -- "$candidate"; then
+      echo "Failed to remove $candidate" >&2
+      failed=1
+      continue
+    fi
   else
-    sudo /bin/rm -rf -- "$candidate"
+    if ! /bin/rm -rf -- "$candidate"; then
+      echo "Standard removal was denied; requesting administrator permission."
+      if ! sudo /bin/rm -rf -- "$candidate"; then
+        echo "Failed to remove $candidate" >&2
+        failed=1
+        continue
+      fi
+    fi
   fi
-  echo "Removed $candidate"
+  if [[ -e "$candidate" ]]; then
+    echo "Removal incomplete: $candidate still exists" >&2
+    failed=1
+  else
+    echo "Removed $candidate"
+    removed=$((removed + 1))
+  fi
 done
-printf '\n%s✓ Angels uninstalled.%s\n' "$GREEN" "$RESET"
+if (( failed != 0 )); then
+  echo 'Angels could not be completely removed. Check the errors above.' >&2
+  exit 1
+fi
+printf '\\n%s✓ Angels uninstalled.%s\\n' "$GREEN" "$RESET"
 echo 'Original preferences and cache remain untouched. Backups are stored in Documents.'
