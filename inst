@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+REPO="jaxonsfx-web/angelsinstaller"
+API="https://api.github.com/repos/${REPO}/releases/latest"
+[[ "$(uname -s)" == "Darwin" ]] || { echo "Angels only supports macOS."; exit 1; }
+[[ "$(uname -m)" == "arm64" ]] || { echo "Angels currently requires Apple Silicon."; exit 1; }
+for cmd in curl shasum python3 installer; do command -v "$cmd" >/dev/null || { echo "Missing $cmd"; exit 1; }; done
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+echo "Checking for a published Angels installer..."
+curl -fsSL --retry 2 "$API" -o "$tmp/latest.json"
+python3 - "$tmp/latest.json" "$tmp/links" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))
+a=r.get("assets",[])
+p=next((x for x in a if x["name"].startswith("Angels-arm64-") and x["name"].endswith(".pkg")),None)
+if p is None: raise SystemExit("No released Apple Silicon Angels installer exists yet.")
+s=next((x for x in a if x["name"]==p["name"]+".sha256"),None)
+if s is None: raise SystemExit("Missing checksum: installation stopped.")
+from urllib.parse import urlparse
+for x in (p,s):
+ u=urlparse(x["browser_download_url"])
+ if u.scheme!="https" or u.hostname!="github.com" or not u.path.startswith("/jaxonsfx-web/angelsinstaller/releases/download/"):
+  raise SystemExit("Unexpected release asset location: installation stopped.")
+with open(sys.argv[2],"w") as f:
+ f.write(p["browser_download_url"]+"\n"+s["browser_download_url"]+"\n"+p["name"]+"\n")
+PY
+pkg_url="$(sed -n '1p' "$tmp/links")"
+hash_url="$(sed -n '2p' "$tmp/links")"
+pkg_name="$(sed -n '3p' "$tmp/links")"
+echo "Downloading $pkg_name..."
+curl -fSL --retry 2 "$pkg_url" -o "$tmp/$pkg_name"
+curl -fSL --retry 2 "$hash_url" -o "$tmp/$pkg_name.sha256"
+(cd "$tmp" && shasum -a 256 -c "$pkg_name.sha256")
+echo "Checksum verified. Installing Angels to /Applications..."
+sudo /usr/sbin/installer -pkg "$tmp/$pkg_name" -target /
+echo "Installation complete. Find Angels in Applications."
