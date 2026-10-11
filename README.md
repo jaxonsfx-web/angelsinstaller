@@ -29,3 +29,11 @@ Publish compiled packages as GitHub Release assets with corresponding SHA-256 ch
 
 ## Limitations
 The installer and uninstaller are shell scripts and have not yet been end-to-end tested on a released Angels build. Ensure macOS code signing/notarization is addressed before public distribution. A checksum alongside a release verifies download integrity but is not a substitute for a trusted signing identity.
+
+## Reinstall and saved settings
+
+Running the installer when `Angels.app` is already in Applications asks whether to reinstall the latest published release. A normal reinstall does not delete existing Angels settings.
+
+Before uninstalling, you can opt to back up supported Angels-specific data to `~/Documents/Angels Settings Backup/`. After a later installation, the installer detects a backup and asks whether to restore it. It never silently overwrites current settings and never copies or deletes Roblox data. Original preferences are retained during uninstall.
+
+**Important limitation:** The current scripts only cover `~/Library/Application Support/Angels` and `~/Library/Preferences/com.angels.launcher.plist`. We have not verified that all Angels features currently save data there. These are interactive **Terminal prompts**, not native macOS graphical popups, and full settings round-trip has not been tested yet.
