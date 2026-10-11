@@ -64,8 +64,11 @@ if [[ ! -t 0 ]]; then echo 'Interactive confirmation required; nothing removed.'
 printf '\nYou may have Angels preferences you want to keep. Save a backup to Documents before uninstalling?\n'
 read -r -p 'Save settings? [Y/n]: ' save_answer
 case "$save_answer" in n|N|no|NO) echo 'Skipping backup.';; *) backup_settings || { echo 'Backup failed; uninstall cancelled.' >&2; exit 1; };; esac
-read -r -p "Type UNINSTALL to confirm: " answer
-if [[ "$answer" != 'UNINSTALL' ]]; then echo 'Cancelled. No changes made.'; exit 0; fi
+read -r -p "Remove Angels.app? [y/N]: " answer
+case "$answer" in
+  y|Y|yes|YES|Yes) ;;
+  *) echo 'Cancelled. No changes made.'; exit 0 ;;
+esac
 # A PKG installed with sudo can own files even when /Applications itself is writable.
 # Always use administrator privileges for the system Applications folder.
 removed=0
