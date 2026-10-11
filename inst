@@ -1,37 +1,89 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-REPO="jaxonsfx-web/angelsinstaller"
-API="https://api.github.com/repos/${REPO}/releases/latest"
-[[ "$(uname -s)" == "Darwin" ]] || { echo "Angels only supports macOS."; exit 1; }
-[[ "$(uname -m)" == "arm64" ]] || { echo "Angels currently requires Apple Silicon."; exit 1; }
-for cmd in curl shasum python3 installer; do command -v "$cmd" >/dev/null || { echo "Missing $cmd"; exit 1; }; done
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  WHITE=$'\033[97m'; GREY=$'\033[90m'; GREEN=$'\033[92m'; RED=$'\033[91m'; RESET=$'\033[0m'
+else WHITE=''; GREY=''; GREEN=''; RED=''; RESET=''; fi
+
+banner() {
+  printf '\n%s' "$WHITE"
+  cat <<'ART'
+           .-------------.
+        .-'      ___      '-.
+       /       .'   '.       \
+       \       '.___.'       /
+        '-.               .-'
+           '-------------'
+                 /|\
+            ____/ | \____
+           /____  |  ____\
+                \ | /
+                 \|/
+              A N G E L S
+ART
+  printf '%s\n' "$RESET"
+  printf '%s\n\n' "${GREY}        macOS installer · Apple Silicon${RESET}"
+}
+step() { printf '\n%s›%s %s\n' "$WHITE" "$RESET" "$1"; }
+complete() { printf '%s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
+fail() { printf '%s✗%s %s\n' "$RED" "$RESET" "$1" >&2; }
+# Spinner only runs when connected to a terminal. Command logs remain available on failure.
+animated() {
+  local label="$1"; shift
+  local log="$tmp/task.log" status=0 pid frame
+  : > "$log"
+  "$@" > "$log" 2>&1 & pid=$!
+  if [[ -t 1 ]]; then
+    local frames=('|' '/' '-' '\\') i=0
+    while kill -0 "$pid" 2>/dev/null; do
+      frame="${frames[i % 4]}"; i=$((i+1))
+      printf '\r\033[K%s[%s]%s %s' "$WHITE" "$frame" "$RESET" "$label"
+      sleep 0.12
+    done
+  fi
+  wait "$pid" || status=$?
+  if [[ -t 1 ]]; then printf '\r\033[K'; fi
+  if (( status != 0 )); then fail "$label"; cat "$log" >&2; return "$status"; fi
+  complete "$label"
+}
+
+banner
+[[ "$(uname -s)" == "Darwin" ]] || { fail "Angels requires macOS."; exit 1; }
+[[ "$(uname -m)" == "arm64" ]] || { fail "This release supports Apple Silicon Macs only."; exit 1; }
+for cmd in curl shasum python3 sed; do command -v "$cmd" >/dev/null || { fail "Missing required command: $cmd"; exit 1; }; done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-echo "Checking for a published Angels installer..."
-curl -fsSL --retry 2 "$API" -o "$tmp/latest.json"
+repo='jaxonsfx-web/angelsinstaller'
+step "Checking for the latest release"
+animated 'Fetching release information' curl -fsSL --retry 2 "https://api.github.com/repos/$repo/releases/latest" -o "$tmp/latest.json"
 python3 - "$tmp/latest.json" "$tmp/links" <<'PY'
-import json,sys
-r=json.load(open(sys.argv[1]))
-a=r.get("assets",[])
-p=next((x for x in a if x["name"].startswith("Angels-arm64-") and x["name"].endswith(".pkg")),None)
-if p is None: raise SystemExit("No released Apple Silicon Angels installer exists yet.")
-s=next((x for x in a if x["name"]==p["name"]+".sha256"),None)
-if s is None: raise SystemExit("Missing checksum: installation stopped.")
+import json, sys
 from urllib.parse import urlparse
-for x in (p,s):
- u=urlparse(x["browser_download_url"])
- if u.scheme!="https" or u.hostname!="github.com" or not u.path.startswith("/jaxonsfx-web/angelsinstaller/releases/download/"):
-  raise SystemExit("Unexpected release asset location: installation stopped.")
-with open(sys.argv[2],"w") as f:
- f.write(p["browser_download_url"]+"\n"+s["browser_download_url"]+"\n"+p["name"]+"\n")
+r = json.load(open(sys.argv[1]))
+assets = r.get('assets', [])
+pkg = next((a for a in assets if a['name'].startswith('Angels-arm64-') and a['name'].endswith('.pkg')), None)
+if not pkg:
+    raise SystemExit('No published Angels Apple Silicon installer is available yet.')
+checksum = next((a for a in assets if a['name'] == pkg['name'] + '.sha256'), None)
+if not checksum:
+    raise SystemExit('The release has no matching checksum; installation cancelled.')
+for asset in (pkg, checksum):
+    url = urlparse(asset['browser_download_url'])
+    if url.scheme != 'https' or url.hostname != 'github.com' or not url.path.startswith('/jaxonsfx-web/angelsinstaller/releases/download/'):
+        raise SystemExit('Unexpected download location; installation cancelled.')
+with open(sys.argv[2], 'w') as out:
+    out.write(pkg['browser_download_url'] + '\n' + checksum['browser_download_url'] + '\n' + pkg['name'] + '\n')
 PY
 pkg_url="$(sed -n '1p' "$tmp/links")"
-hash_url="$(sed -n '2p' "$tmp/links")"
+checksum_url="$(sed -n '2p' "$tmp/links")"
 pkg_name="$(sed -n '3p' "$tmp/links")"
-echo "Downloading $pkg_name..."
-curl -fSL --retry 2 "$pkg_url" -o "$tmp/$pkg_name"
-curl -fSL --retry 2 "$hash_url" -o "$tmp/$pkg_name.sha256"
-(cd "$tmp" && shasum -a 256 -c "$pkg_name.sha256")
-echo "Checksum verified. Installing Angels to /Applications..."
-sudo /usr/sbin/installer -pkg "$tmp/$pkg_name" -target /
-echo "Installation complete. Find Angels in Applications."
+step "Downloading Angels"
+animated 'Downloading application package' curl -fSL --retry 2 "$pkg_url" -o "$tmp/$pkg_name"
+animated 'Downloading verification checksum' curl -fSL --retry 2 "$checksum_url" -o "$tmp/$pkg_name.sha256"
+step 'Checking package integrity'
+animated 'Verifying SHA-256 checksum' bash -c 'cd "$1" && shasum -a 256 -c "$2"' _ "$tmp" "$pkg_name.sha256"
+step 'Installing to /Applications'
+printf '%s\n' "${GREY}macOS may request your administrator password.${RESET}"
+animated 'Installing Angels.app' sudo /usr/sbin/installer -pkg "$tmp/$pkg_name" -target /
+printf '\n%s✓ Angels installation complete.%s\n' "$GREEN" "$RESET"
+printf 'Open Angels from the Applications folder.\n\n'
