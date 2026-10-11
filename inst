@@ -44,30 +44,43 @@ banner() {
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠙⠛⠻⠿⣿⠇
 ART
   printf '%s\n' "$RESET"
-  printf '%s\n' "${GREY}                A N G E L S${RESET}"
-  printf '%s\n\n' "${GREY}        macOS installer · Apple Silicon${RESET}"
+  printf '\n'
 }
-step() { printf '\n%s›%s %s\n' "$WHITE" "$RESET" "$1"; }
-complete() { printf '%s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
 fail() { printf '%s✗%s %s\n' "$RED" "$RESET" "$1" >&2; }
-# Spinner only runs when connected to a terminal. Command logs remain available on failure.
-animated() {
-  local label="$1"; shift
-  local log="$tmp/task.log" status=0 pid frame
-  : > "$log"
-  "$@" > "$log" 2>&1 & pid=$!
+# An indeterminate progress bar: never suggests false download percentages.
+progress_start() {
   if [[ -t 1 ]]; then
-    local frames=('|' '/' '-' '\\') i=0
-    while kill -0 "$pid" 2>/dev/null; do
-      frame="${frames[i % 4]}"; i=$((i+1))
-      printf '\r\033[K%s[%s]%s %s' "$WHITE" "$frame" "$RESET" "$label"
-      sleep 0.12
-    done
+    (
+      local tick=0 width=24 spot bar i
+      while :; do
+        spot=$((tick % (width + 5) - 4))
+        bar=''
+        for ((i=0; i<width; i++)); do
+          if (( i >= spot && i < spot+5 )); then bar+='█'; else bar+='░'; fi
+        done
+        printf '\r  [%s]' "$bar"
+        tick=$((tick+1))
+        sleep 0.10
+      done
+    ) &
+    PROGRESS_PID=$!
+  else
+    PROGRESS_PID=''
   fi
-  wait "$pid" || status=$?
-  if [[ -t 1 ]]; then printf '\r\033[K'; fi
-  if (( status != 0 )); then fail "$label"; cat "$log" >&2; return "$status"; fi
-  complete "$label"
+}
+progress_stop() {
+  if [[ -n "${PROGRESS_PID:-}" ]]; then
+    kill "$PROGRESS_PID" >/dev/null 2>&1 || true
+    wait "$PROGRESS_PID" 2>/dev/null || true
+    printf '\r  [%s]\n' "████████████████████████"
+    PROGRESS_PID=''
+  fi
+}
+fail_and_exit() {
+  progress_stop
+  fail "$1"
+  if [[ -s "$tmp/error.log" ]]; then cat "$tmp/error.log" >&2; fi
+  exit 1
 }
 
 BACKUP_ROOT="$HOME/Documents/Angels Settings Backup"
@@ -115,9 +128,12 @@ if [[ -d /Applications/Angels.app || -d "$HOME/Applications/Angels.app" ]]; then
  read -r -p 'Reinstall Angels? [y/N]: ' answer
  case "$answer" in y|Y|yes|YES) ;; *) echo 'Reinstall cancelled.'; exit 0;; esac
 fi
-step "Checking for the latest release"
-animated 'Fetching release information' curl -fsSL --retry 2 -H 'Cache-Control: no-cache' "https://api.github.com/repos/$repo/releases?per_page=100&cache=$(date +%s)" -o "$tmp/latest.json"
-python3 - "$tmp/latest.json" "$tmp/links" <<'PY'
+printf '\n› Downloading Angels\n'
+progress_start
+if ! curl -fsSL --retry 2 -H 'Cache-Control: no-cache' "https://api.github.com/repos/$repo/releases?per_page=100&cache=$(date +%s)" -o "$tmp/latest.json" 2>"$tmp/error.log"; then
+  fail_and_exit 'Could not check published releases.'
+fi
+python3 - "$tmp/latest.json" "$tmp/links" >"$tmp/error.log" 2>&1 <<'PY' || fail_and_exit 'Could not select a published Angels release.'
 import json, sys
 from urllib.parse import urlparse
 releases = json.load(open(sys.argv[1]))
@@ -152,18 +168,23 @@ PY
 pkg_url="$(sed -n '1p' "$tmp/links")"
 checksum_url="$(sed -n '2p' "$tmp/links")"
 pkg_name="$(sed -n '3p' "$tmp/links")"
-printf '\nSelected package: %s\n' "$pkg_name"
-if [[ "$pkg_name" == "Angels-arm64-0.9.0.pkg" ]]; then
-  echo 'Only Angels 0.9.0 is published. Newer Actions builds require publication as a release.'
+if ! curl -fsSL --retry 2 "$pkg_url" -o "$tmp/$pkg_name" 2>"$tmp/error.log"; then
+  fail_and_exit 'Could not download Angels.'
 fi
-step "Downloading Angels"
-animated 'Downloading application package' curl -fSL --retry 2 "$pkg_url" -o "$tmp/$pkg_name"
-animated 'Downloading verification checksum' curl -fSL --retry 2 "$checksum_url" -o "$tmp/$pkg_name.sha256"
-step 'Checking package integrity'
-animated 'Verifying SHA-256 checksum' bash -c 'cd "$1" && shasum -a 256 -c "$2"' _ "$tmp" "$pkg_name.sha256"
-step 'Installing to /Applications'
-printf '%s\n' "${GREY}macOS may request your administrator password.${RESET}"
-animated 'Installing Angels.app' sudo /usr/sbin/installer -pkg "$tmp/$pkg_name" -target /
-printf '\n%s✓ Angels installation complete.%s\n' "$GREEN" "$RESET"
+if ! curl -fsSL --retry 2 "$checksum_url" -o "$tmp/$pkg_name.sha256" 2>"$tmp/error.log"; then
+  fail_and_exit 'Could not download the verification checksum.'
+fi
+if ! (cd "$tmp" && shasum -a 256 -c "$pkg_name.sha256") >"$tmp/error.log" 2>&1; then
+  fail_and_exit 'Downloaded package failed integrity verification.'
+fi
+progress_stop
+printf '%s✓%s Completed Download\n' "$GREEN" "$RESET"
+
+# Administrator authentication can prompt interactively here.
+if ! sudo /usr/sbin/installer -pkg "$tmp/$pkg_name" -target / >"$tmp/error.log" 2>&1; then
+  fail "Installation failed."
+  cat "$tmp/error.log" >&2
+  exit 1
+fi
+printf '%s✓%s Angels installed successfully.\n' "$GREEN" "$RESET"
 restore_settings
-printf 'Open Angels from the Applications folder.\n\n'
