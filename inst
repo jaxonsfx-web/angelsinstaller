@@ -101,11 +101,16 @@ if [[ -d /Applications/Angels.app || -d "$HOME/Applications/Angels.app" ]]; then
  case "$answer" in y|Y|yes|YES) ;; *) echo 'Reinstall cancelled.'; exit 0;; esac
 fi
 step "Checking for the latest release"
-animated 'Fetching release information' curl -fsSL --retry 2 "https://api.github.com/repos/$repo/releases/latest" -o "$tmp/latest.json"
+animated 'Fetching release information' curl -fsSL --retry 2 "https://api.github.com/repos/$repo/releases?per_page=30" -o "$tmp/latest.json"
 python3 - "$tmp/latest.json" "$tmp/links" <<'PY'
 import json, sys
 from urllib.parse import urlparse
-r = json.load(open(sys.argv[1]))
+releases = json.load(open(sys.argv[1]))
+if not isinstance(releases, list):
+    raise SystemExit('Unexpected GitHub release response.')
+r = next((release for release in releases if not release.get('draft') and not release.get('prerelease') and any(a.get('name', '').startswith('Angels-arm64-') and a.get('name', '').endswith('.pkg') for a in release.get('assets', []))), None)
+if r is None:
+    raise SystemExit('No published Angels macOS package found among the recent releases.')
 assets = r.get('assets', [])
 pkg = next((a for a in assets if a['name'].startswith('Angels-arm64-') and a['name'].endswith('.pkg')), None)
 if not pkg:
